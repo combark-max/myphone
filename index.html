@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#FAF6F0" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="明's Life" />
+  <title>明's Life</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link href="https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700;800&family=Noto+Sans+KR:wght@300;400;500&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #FAF6F0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; }
+    #root { height: 100%; display: flex; flex-direction: column; }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.3)} }
+    @keyframes savePop { 0%{transform:scale(1)} 50%{transform:scale(1.15)} 100%{transform:scale(1)} }
+    @keyframes slideUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+    ::-webkit-scrollbar { display: none; }
+    textarea { -webkit-appearance: none; }
+    button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+const STORAGE_KEY = 'diary_entries_v2';
+
+function loadEntries() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch(e) {}
+  return {
+    "2026-04-20": { text: "오늘은 오랜만에 카페에 갔다. 창가 자리에 앉아 따뜻한 라테를 마시며 책을 읽었는데, 봄 햇살이 너무 좋았다. 이런 평화로운 순간이 오래 기억될 것 같다.", mood: "행복", photo: null },
+    "2026-04-18": { text: "요즘 피곤한 날들이 계속된다. 그래도 저녁에 산책을 나갔더니 기분이 조금 나아졌다. 벚꽃이 거의 다 졌지만 연두색 잎사귀들이 예쁘게 돋아나고 있다.", mood: "평온", photo: null },
+  };
+}
+
+const MOODS = ["행복", "평온", "설렘", "피곤", "슬픔", "화남"];
+const MOOD_COLORS = { 행복:"#F6A623", 평온:"#7BAFD4", 설렘:"#E87D7D", 피곤:"#A89F94", 슬픔:"#7A9BB5", 화남:"#C0654A" };
+const MOOD_EMOJI  = { 행복:"☀️", 평온:"🌿", 설렘:"🌸", 피곤:"🌙", 슬픔:"🌧️", 화남:"🔥" };
+
+function formatDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString("ko-KR", { year:"numeric", month:"long", day:"numeric", weekday:"long" });
+}
+function getTodayStr() { return new Date().toISOString().split("T")[0]; }
+
+function DiaryApp() {
+  const [entries, setEntries] = useState(loadEntries);
+  const [view, setView] = useState("list");
+  const [selectedDate, setSelectedDate] = useState(getTodayStr());
+  const [draft, setDraft] = useState({ text:"", mood:"행복", photo:null });
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [saveAnim, setSaveAnim] = useState(false);
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() };
+  });
+  const fileInputRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); } catch(e) {}
+  }, [entries]);
+
+  useEffect(() => {
+    if (view === "write" && entries[selectedDate]) {
+      setDraft({ text: entries[selectedDate].text||"", mood: entries[selectedDate].mood||"행복", photo: entries[selectedDate].photo||null });
+      setPhotoPreview(entries[selectedDate].photo||null);
+    } else if (view === "write") {
+      setDraft({ text:"", mood:"행복", photo:null });
+      setPhotoPreview(null);
+    }
+    setShowCalendar(false);
+  }, [view, selectedDate]);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      mr.ondataavailable = () => {};
+      mr.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        const sample = "오늘 하루도 수고했어. 좋은 일들이 많이 있었으면 좋겠다.";
+        setDraft(d => ({ ...d, text: d.text + (d.text ? " " : "") + sample }));
+      };
+      mr.start();
+      mediaRecorderRef.current = mr;
+      setIsRecording(true);
+      setRecordingTime(0);
+      timerRef.current = setInterval(() => setRecordingTime(t => t+1), 1000);
+    } catch { alert("마이크 접근 권한이 필요합니다."); }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current) { mediaRecorderRef.current.stop(); mediaRecorderRef.current = null; }
+    clearInterval(timerRef.current);
+    setIsRecording(false); setRecordingTime(0);
+  };
+
+  const handlePhoto = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => { setPhotoPreview(ev.target.result); setDraft(d => ({...d, photo:ev.target.result})); };
+    reader.readAsDataURL(file);
+  };
+
+  const saveEntry = () => {
+    setEntries(prev => ({ ...prev, [selectedDate]: { ...draft } }));
+    setSaveAnim(true);
+    setTimeout(() => { setSaveAnim(false); setView("list"); }, 700);
+  };
+
+  const deleteEntry = (date) => {
+    if (!confirm("이 일기를 삭제할까요?")) return;
+    setEntries(prev => { const n={...prev}; delete n[date]; return n; });
+    setView("list");
+  };
+
+  const sortedDates = Object.keys(entries).sort((a,b) => b.localeCompare(a));
+
+  const exportAll = () => {
+    if (!sortedDates.length) { alert("저장할 일기가 없어요."); return; }
+    sortedDates.forEach(date => {
+      const e = entries[date];
+      const content = [`📖 明's Life — 일기`, `날짜: ${formatDate(date)}`, `기분: ${MOOD_EMOJI[e.mood]} ${e.mood}`, ``, `────────────────────`, ``, e.text||"(내용 없음)", ``, `────────────────────`, `저장: ${new Date().toLocaleString("ko-KR")}`].join("\n");
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([content], {type:"text/plain;charset=utf-8"}));
+      a.download = `diary_${date}.txt`; a.click();
+    });
+  };
+
+  const S = styles;
+
+  return (
+    <div style={S.root}>
+      {/* HEADER */}
+      <div style={S.header}>
+        <div style={S.headerInner}>
+          {view !== "list"
+            ? <button style={S.iconBtn} onClick={() => setView("list")}>←</button>
+            : <div style={{width:36}} />
+          }
+          <div style={S.headerTitle}>
+            {view === "list" && <><span style={{color:"#C0392B",fontWeight:900}}>明</span>'s Life</>}
+            {view === "write" && <>✏️ {formatDate(selectedDate).split(" ").slice(0,3).join(" ")}</>}
+            {view === "read"  && <>📖 일기 보기</>}
+          </div>
+          {view === "list"  && <button style={S.pillBtn} onClick={() => { setSelectedDate(getTodayStr()); setView("write"); }}>+ 오늘</button>}
+          {view === "write" && <button style={{...S.pillBtn, ...(saveAnim?{background:"#5C8A4E",animation:"savePop .4s ease"}:{})}} onClick={saveEntry}>저장</button>}
+          {view === "read"  && <button style={{...S.pillBtn, background:"transparent", color:"#8B6D4E", border:"1px solid #C4A882"}} onClick={() => setView("write")}>수정</button>}
+        </div>
+      </div>
+
+      {/* LIST */}
+      {view === "list" && (
+        <div style={S.scroll}>
+          <div style={S.hero}>
+            <div style={S.heroDate}>{new Date().toLocaleDateString("ko-KR",{month:"long",day:"numeric"})}</div>
+            <div style={S.heroSub}>오늘의 이야기를 기록해요</div>
+            <div style={S.heroEmoji}>🌿</div>
+          </div>
+          {!sortedDates.length && (
+            <div style={S.empty}><div style={{fontSize:44}}>📝</div><p>첫 번째 일기를 써보세요!</p></div>
+          )}
+          {sortedDates.map(date => {
+            const e = entries[date];
+            const mc = MOOD_COLORS[e.mood]||"#C4A882";
+            return (
+              <div key={date} style={S.card} onClick={() => { setSelectedDate(date); setView("read"); }}>
+                <div style={{...S.cardBar, background:mc}} />
+                <div style={S.cardBody}>
+                  <div style={S.cardRow}>
+                    <span style={S.cardDate}>{formatDate(date).split(" ").slice(0,3).join(" ")}</span>
+                    <span style={{...S.badge, background:mc+"25", color:mc}}>{MOOD_EMOJI[e.mood]} {e.mood}</span>
+                  </div>
+                  <div style={S.cardPreview}>{(e.text||"").slice(0,55)}{e.text&&e.text.length>55?"…":""}</div>
+                  {e.photo && <img src={e.photo} alt="" style={S.cardThumb} />}
+                </div>
+              </div>
+            );
+          })}
+          <div style={{height:16}} />
+        </div>
+      )}
+
+      {/* WRITE */}
+      {view === "write" && (
+        <div style={S.scroll}>
+          <div style={{padding:"18px 18px 0"}}>
+
+            {/* Date picker */}
+            <button style={S.datePill} onClick={() => setShowCalendar(v=>!v)}>
+              <span style={S.datePillText}>{formatDate(selectedDate)}</span>
+              <span style={{fontSize:13, opacity:.6}}>📅</span>
+            </button>
+
+            {showCalendar && (
+              <div style={S.cal}>
+                <div style={S.calHead}>
+                  <button style={S.calNav} onClick={()=>setCalendarMonth(m=>{const d=new Date(m.year,m.month-1,1);return{year:d.getFullYear(),month:d.getMonth()}})}>‹</button>
+                  <span style={S.calTitle}>{calendarMonth.year}년 {calendarMonth.month+1}월</span>
+                  <button style={S.calNav} onClick={()=>setCalendarMonth(m=>{const d=new Date(m.year,m.month+1,1);return{year:d.getFullYear(),month:d.getMonth()}})}>›</button>
+                </div>
+                <div style={S.calGrid}>
+                  {["일","월","화","수","목","금","토"].map((d,i)=>(
+                    <div key={d} style={{...S.calDayLabel, color:i===0?"#C0392B":i===6?"#7BAFD4":"#A89070"}}>{d}</div>
+                  ))}
+                  {(()=>{
+                    const first=new Date(calendarMonth.year,calendarMonth.month,1).getDay();
+                    const days=new Date(calendarMonth.year,calendarMonth.month+1,0).getDate();
+                    const cells=[];
+                    for(let i=0;i<first;i++) cells.push(<div key={`e${i}`}/>);
+                    for(let d=1;d<=days;d++){
+                      const ds=`${calendarMonth.year}-${String(calendarMonth.month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+                      const sel=ds===selectedDate, has=!!entries[ds];
+                      const dow=new Date(calendarMonth.year,calendarMonth.month,d).getDay();
+                      cells.push(
+                        <button key={d} style={{...S.calDay,...(sel?S.calDaySel:{})}}
+                          onClick={()=>{setSelectedDate(ds);setShowCalendar(false);}}>
+                          <span style={{color:sel?"#FAF6F0":dow===0?"#C0392B":dow===6?"#7BAFD4":"#5C4A32"}}>{d}</span>
+                          {has&&<div style={{...S.calDot,background:sel?"#FAF6F0":"#C4A882"}}/>}
+                        </button>
+                      );
+                    }
+                    return cells;
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* Mood */}
+            <div style={S.section}>
+              <div style={S.label}>오늘의 기분</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                {MOODS.map(m=>(
+                  <button key={m} style={{...S.moodChip,...(draft.mood===m?{background:MOOD_COLORS[m],color:"#fff",borderColor:MOOD_COLORS[m]}:{})}}
+                    onClick={()=>setDraft(d=>({...d,mood:m}))}>
+                    {MOOD_EMOJI[m]} {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Photo */}
+            <div style={S.section}>
+              <div style={S.label}>사진 첨부</div>
+              <input ref={fileInputRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhoto}/>
+              {photoPreview
+                ? <div style={{position:"relative",borderRadius:14,overflow:"hidden"}}>
+                    <img src={photoPreview} alt="" style={{width:"100%",maxHeight:200,objectFit:"cover",display:"block",borderRadius:14}}/>
+                    <button style={S.removePhoto} onClick={()=>{setPhotoPreview(null);setDraft(d=>({...d,photo:null}));}}>✕</button>
+                  </div>
+                : <button style={S.photoBtn} onClick={()=>fileInputRef.current.click()}>
+                    <span style={{fontSize:24}}>📷</span>
+                    <span>사진 추가 / 카메라 촬영</span>
+                  </button>
+              }
+            </div>
+
+            {/* Text */}
+            <div style={S.section}>
+              <div style={S.label}>오늘의 이야기</div>
+              <textarea style={S.textarea} placeholder="오늘 하루는 어땠나요? 느낀 것, 있었던 일, 감사한 것들을 자유롭게 적어보세요..."
+                value={draft.text} onChange={e=>setDraft(d=>({...d,text:e.target.value}))}/>
+            </div>
+
+            {/* Voice */}
+            <div style={S.section}>
+              <div style={S.label}>음성으로 쓰기</div>
+              {isRecording
+                ? <div style={S.recBox}>
+                    <div style={S.recDot}/>
+                    <span style={{fontFamily:"monospace",fontSize:16,fontWeight:700,color:"#5C4A32"}}>
+                      {Math.floor(recordingTime/60).toString().padStart(2,"0")}:{(recordingTime%60).toString().padStart(2,"0")}
+                    </span>
+                    <span style={{color:"#C0654A",fontSize:13}}>녹음 중...</span>
+                    <button style={S.stopBtn} onClick={stopRecording}>⏹ 완료</button>
+                  </div>
+                : <button style={S.voiceBtn} onClick={startRecording}>
+                    <span style={{fontSize:22}}>🎙️</span> 음성 입력 시작
+                  </button>
+              }
+            </div>
+            <div style={{height:24}}/>
+          </div>
+        </div>
+      )}
+
+      {/* READ */}
+      {view === "read" && entries[selectedDate] && (
+        <div style={S.scroll}>
+          <div style={{padding:"20px 18px 0"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}}>
+              <span style={{fontFamily:"'Nanum Myeongjo',serif",fontSize:17,fontWeight:700,color:"#5C4A32"}}>{formatDate(selectedDate)}</span>
+              <span style={{...S.badge, background:(MOOD_COLORS[entries[selectedDate].mood]||"#C4A882")+"22", color:MOOD_COLORS[entries[selectedDate].mood]||"#C4A882"}}>
+                {MOOD_EMOJI[entries[selectedDate].mood]} {entries[selectedDate].mood}
+              </span>
+            </div>
+            {entries[selectedDate].photo && (
+              <div style={{borderRadius:16,overflow:"hidden",marginBottom:18}}>
+                <img src={entries[selectedDate].photo} alt="" style={{width:"100%",maxHeight:240,objectFit:"cover",display:"block"}}/>
+              </div>
+            )}
+            <div style={{height:1,background:"#E8DDD0",marginBottom:18}}/>
+            <div style={{fontSize:17,color:"#5C4A32",lineHeight:2,fontFamily:"'Nanum Myeongjo',serif",marginBottom:28,whiteSpace:"pre-wrap"}}>
+              {entries[selectedDate].text}
+            </div>
+            <button style={{width:"100%",background:"none",border:"1px solid #E0D0C4",color:"#A89070",borderRadius:10,padding:"11px",fontSize:13,cursor:"pointer",fontFamily:"'Noto Sans KR',sans-serif"}}
+              onClick={()=>deleteEntry(selectedDate)}>🗑 일기 삭제</button>
+            <div style={{height:80}}/>
+          </div>
+        </div>
+      )}
+
+      {/* BOTTOM BAR */}
+      <div style={S.bottomBar}>
+        <button style={S.exportBtn} onClick={exportAll}>
+          <div style={S.exportIcon}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h8l4 4v12a2 2 0 01-2 2z" stroke="#8B6D4E" strokeWidth="1.8" strokeLinejoin="round"/>
+              <path d="M9 21v-6h6v6M9 3v4h6V3" stroke="#8B6D4E" strokeWidth="1.8" strokeLinejoin="round"/>
+            </svg>
+          </div>
+          <span style={{flex:1,textAlign:"left",fontSize:14,fontWeight:600,color:"#5C4A32"}}>전체 내보내기</span>
+          <span style={{fontSize:12,color:"#A89070",background:"#E8DDD0",borderRadius:20,padding:"3px 10px"}}>{sortedDates.length}개</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const styles = {
+  root: { height:"100%", display:"flex", flexDirection:"column", background:"#FAF6F0", maxWidth:480, margin:"0 auto" },
+  header: { background:"#FAF6F0", borderBottom:"1px solid #E8DDD0", padding:"max(env(safe-area-inset-top),14px) 16px 12px", flexShrink:0, zIndex:10 },
+  headerInner: { display:"flex", alignItems:"center", justifyContent:"space-between" },
+  headerTitle: { fontFamily:"'Nanum Myeongjo',serif", fontSize:22, fontWeight:900, color:"#5C4A32", flex:1, textAlign:"center" },
+  iconBtn: { width:36, height:36, background:"none", border:"none", fontSize:20, color:"#8B6D4E", cursor:"pointer", borderRadius:8 },
+  pillBtn: { background:"#8B6D4E", color:"#FAF6F0", border:"none", borderRadius:20, padding:"6px 14px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"'Noto Sans KR',sans-serif", whiteSpace:"nowrap" },
+  scroll: { flex:1, overflowY:"auto", WebkitOverflowScrolling:"touch" },
+  hero: { background:"linear-gradient(135deg,#C8B89A,#B8A080)", margin:"14px 14px 6px", borderRadius:18, padding:"24px 20px", position:"relative", overflow:"hidden" },
+  heroDate: { fontFamily:"'Nanum Myeongjo',serif", fontSize:24, fontWeight:800, color:"#FAF6F0", marginBottom:4 },
+  heroSub: { fontSize:13, color:"#EDE5DA", fontWeight:300 },
+  heroEmoji: { position:"absolute", right:18, top:"50%", transform:"translateY(-50%)", fontSize:44, opacity:.6 },
+  empty: { textAlign:"center", padding:"56px 24px", color:"#A89070", display:"flex", flexDirection:"column", alignItems:"center", gap:12, fontSize:14 },
+  card: { margin:"0 14px 10px", borderRadius:14, background:"#FFFDF9", boxShadow:"0 2px 10px rgba(100,70,40,.07)", overflow:"hidden", display:"flex", cursor:"pointer", animation:"slideUp .25s ease" },
+  cardBar: { width:4, flexShrink:0 },
+  cardBody: { padding:"12px 14px", flex:1, minWidth:0 },
+  cardRow: { display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:5 },
+  cardDate: { fontFamily:"'Nanum Myeongjo',serif", fontSize:14, fontWeight:700, color:"#5C4A32" },
+  badge: { borderRadius:20, padding:"2px 9px", fontSize:11, fontWeight:500 },
+  cardPreview: { fontSize:13, color:"#8B7A68", lineHeight:1.55, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
+  cardThumb: { width:48, height:48, objectFit:"cover", borderRadius:8, marginTop:7 },
+  datePill: { width:"100%", background:"#F0E8DC", border:"none", borderRadius:12, padding:"11px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, cursor:"pointer" },
+  datePillText: { fontFamily:"'Nanum Myeongjo',serif", fontSize:15, color:"#6B5240", fontWeight:700 },
+  cal: { background:"#FFFDF9", border:"1.5px solid #E0D4C4", borderRadius:14, padding:14, marginBottom:16, boxShadow:"0 4px 18px rgba(100,70,40,.1)" },
+  calHead: { display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 },
+  calNav: { background:"#F0E8DC", border:"none", borderRadius:8, width:30, height:30, fontSize:18, color:"#8B6D4E", cursor:"pointer" },
+  calTitle: { fontFamily:"'Nanum Myeongjo',serif", fontSize:15, fontWeight:700, color:"#5C4A32" },
+  calGrid: { display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:"3px 2px" },
+  calDayLabel: { textAlign:"center", fontSize:11, fontWeight:600, padding:"3px 0" },
+  calDay: { background:"none", border:"none", borderRadius:7, padding:"5px 2px", fontSize:13, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:2, minHeight:32 },
+  calDaySel: { background:"#8B6D4E" },
+  calDot: { width:4, height:4, borderRadius:"50%" },
+  section: { marginBottom:20 },
+  label: { fontSize:11, fontWeight:500, color:"#A89070", letterSpacing:1, textTransform:"uppercase", marginBottom:9 },
+  moodChip: { border:"1.5px solid #D4C4B0", background:"#FFFDF9", borderRadius:20, padding:"6px 11px", fontSize:12, color:"#8B7A68", cursor:"pointer", fontFamily:"'Noto Sans KR',sans-serif" },
+  photoBtn: { width:"100%", border:"2px dashed #D4C4B0", background:"#FAF6F0", borderRadius:13, padding:18, display:"flex", flexDirection:"column", alignItems:"center", gap:7, cursor:"pointer", fontSize:13, color:"#A89070" },
+  removePhoto: { position:"absolute", top:8, right:8, background:"rgba(0,0,0,.5)", color:"#fff", border:"none", borderRadius:"50%", width:28, height:28, fontSize:13, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" },
+  textarea: { width:"100%", minHeight:160, border:"1.5px solid #E0D4C4", borderRadius:13, padding:13, fontSize:16, color:"#5C4A32", background:"#FFFDF9", resize:"none", fontFamily:"'Noto Sans KR',sans-serif", lineHeight:1.8, outline:"none" },
+  voiceBtn: { width:"100%", background:"linear-gradient(135deg,#8B6D4E,#C4A882)", border:"none", borderRadius:13, padding:15, display:"flex", alignItems:"center", justifyContent:"center", gap:10, fontSize:14, color:"#FAF6F0", cursor:"pointer", fontFamily:"'Noto Sans KR',sans-serif", fontWeight:500 },
+  recBox: { background:"#FFF0EE", border:"1.5px solid #E87D7D", borderRadius:13, padding:15, display:"flex", alignItems:"center", gap:11 },
+  recDot: { width:10, height:10, borderRadius:"50%", background:"#C0654A", animation:"pulse 1s infinite", flexShrink:0 },
+  stopBtn: { marginLeft:"auto", background:"#C0654A", color:"#fff", border:"none", borderRadius:9, padding:"6px 13px", fontSize:12, cursor:"pointer" },
+  bottomBar: { borderTop:"1px solid #E8DDD0", background:"#FAF6F0", padding:"10px 16px", paddingBottom:"max(env(safe-area-inset-bottom),12px)", flexShrink:0 },
+  exportBtn: { width:"100%", background:"linear-gradient(135deg,#F0E8DC,#E8DDD0)", border:"1.5px solid #D4C4B0", borderRadius:14, padding:"11px 16px", display:"flex", alignItems:"center", gap:11, cursor:"pointer" },
+  exportIcon: { width:38, height:38, background:"#FFFDF9", borderRadius:9, display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 2px 8px rgba(100,70,40,.1)", flexShrink:0 },
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<DiaryApp />);
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  const banner = document.createElement('div');
+  banner.style.cssText = 'position:fixed;bottom:72px;left:12px;right:12px;background:#5C4A32;color:#FAF6F0;border-radius:16px;padding:13px 16px;display:flex;align-items:center;gap:11px;box-shadow:0 8px 28px rgba(100,70,40,.35);z-index:9999;font-family:Noto Sans KR,sans-serif;font-size:14px;animation:slideUp .3s ease;max-width:448px;margin:0 auto;';
+  banner.innerHTML = '<span style="font-size:22px">📲</span><span style="flex:1">홈 화면에 앱으로 설치하기</span><button id="ib" style="background:#FAF6F0;color:#5C4A32;border:none;border-radius:10px;padding:6px 13px;font-weight:700;cursor:pointer;font-size:13px">설치</button><button id="db" style="background:none;border:none;color:#C4A882;font-size:20px;cursor:pointer;line-height:1">×</button>';
+  document.body.appendChild(banner);
+  document.getElementById('ib').onclick = async () => { deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt=null; banner.remove(); };
+  document.getElementById('db').onclick = () => banner.remove();
+});
+</script>
+</body>
+</html>
